@@ -1,0 +1,19 @@
+instalación necesario para correr el programa:
+
+Paso 1: Instala la librería "virtualenv".
+	- Abre el terminal "cmd" de Windows como administrador.
+	- Ejecuta "cmd" como administrador.
+	- en linea de comando escribe: pip install virtualenv .
+
+Paso 2: Debes crear tu entorno virtual en el terminal de VSCODE.
+	- Abre tu proyecto en vscode y abre el terminal.
+	- en línea de código ejecuta: python -m virtualenv venv -> venv es el nombre de la carpeta tu puedes cambiarlo
+	
+Paso 2: Iniciar tu entorno y activa
+	- En el mismo terminal de vdcode
+	- En línea de código ejecuta: .\venv\Scripts\actívate -> remplace venv por el nombre de la carpeta que creaste.
+
+Paso 3: Instalar el requerimientos del sistema
+	- En el mismo terminal de vdcode
+	- En la línea de codigo ejecuta: pip install -r ".\requirements.txt"
+	- Al final ejecuta el codgio: pip list -> para ver la lista de los paquetes que tiene que tener el proyecto.

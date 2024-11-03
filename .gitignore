@@ -1,0 +1,46 @@
+# Entorno virtual
+venv/
+__pycache__/
+
+# Archivos de caché de Python
+*.py[cod]
+
+# Archivos de logs y bases de datos temporales
+*.log
+*.sqlite3
+
+# Archivos de configuración del entorno
+.env
+
+# Archivos de compilación
+*.pyc
+*.pyo
+*.pyd
+
+# Directorios de IDEs y editores
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Archivos específicos del sistema operativo
+.DS_Store
+Thumbs.db
+
+# Archivos de test y cobertura
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Node.js si tienes dependencias de front-end (ajustar si no aplica)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Otros archivos temporales
+*.swp
+*.bak
+*.tmp
+*.old
+*.orig

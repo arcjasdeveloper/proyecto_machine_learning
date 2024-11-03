@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Editar Producto</title>
+</head>
+<body>
+    <h1>Editar Producto</h1>
+    <form action="{{ url_for('edit_product', product_id=product[0]) }}" method="POST" enctype="multipart/form-data">
+        <label for="nombre">Nombre:</label>
+        <input type="text" name="nombre" value="{{ product[1] }}" required><br>
+        <label for="descripcion">Descripción:</label>
+        <textarea name="descripcion" required>{{ product[2] }}</textarea><br>
+        <label for="categoria">Categoría:</label>
+        <input type="text" name="categoria" value="{{ product[3] }}" required><br>
+        <label for="codigo_barras">Código de Barras:</label>
+        <input type="text" name="codigo_barras" value="{{ product[4] }}" required><br>
+        <label for="imagen">Imagen (opcional):</label>
+        <input type="file" name="imagen" accept="image/*><br>
+        <button type="submit">Actualizar Producto</button>
+    </form>
+    <a href="{{ url_for('list_products') }}">Volver a la lista de productos</a>
+</body>
+</html>
