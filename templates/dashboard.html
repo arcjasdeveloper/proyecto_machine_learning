@@ -1,0 +1,47 @@
+<!-- templates/dashboard.html -->
+{% extends "layouts/base.html" %}
+
+{% block title %}Dashboard - Sistema de Inventario{% endblock %}
+
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<!-- Tarjetas de estadísticas -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+    <div class="bg-white rounded-lg shadow-md p-6">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-gray-500">Total Productos</p>
+                <h3 class="text-2xl font-bold">{{ total_products }}</h3>
+            </div>
+            <div class="bg-blue-100 p-3 rounded-full">
+                <i class="fas fa-box text-blue-500"></i>
+            </div>
+        </div>
+        <p class="text-green-500 text-sm mt-4">
+            <i class="fas fa-arrow-up"></i> 12% más que el mes pasado
+        </p>
+    </div>
+
+    <!-- Otras tarjetas de estadísticas aquí... -->
+</div>
+
+<!-- Tabla de Productos Recientes -->
+<div class="bg-white rounded-lg shadow-md p-6">
+    <div class="flex justify-between items-center mb-4">
+        <h4 class="text-lg font-semibold">Productos Recientes</h4>
+        <a href="{{ url_for('list_products') }}" class="text-blue-500 hover:text-blue-700">Ver todos</a>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="min-w-full">
+            <!-- Tabla de productos aquí... -->
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Scripts específicos del dashboard aquí...
+</script>
+{% endblock %}

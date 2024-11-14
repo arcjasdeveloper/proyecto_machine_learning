@@ -1,138 +1,769 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+import base64
+from datetime import datetime
+from io import BytesIO
+import numpy as np
+from PIL import Image
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
 import mysql.connector
 import os
+import face_recognition
 from werkzeug.utils import secure_filename
-from models.user import User
-from models.product import Product
-from utils.face_recognition import recognize_face
 
 app = Flask(__name__)
-app.secret_key = 'tu_clave_secreta'  # Cambia esto por una clave secreta más segura
+app.secret_key = 'your_secret_key_here'  # Change this in production
 
-# Configuración de la base de datos
+# Database configuration
+DB_CONFIG = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '',
+    'database': 'warehouse'
+}
+
+
 def get_db_connection():
-    connection = mysql.connector.connect(
-        host='localhost',
-        user='root',  # Por defecto, el usuario es 'root'
-        password='',  # La contraseña está vacía por defecto
-        database='almacen'  # Reemplaza con el nombre de tu base de datos
-    )
-    return connection
+    return mysql.connector.connect(**DB_CONFIG)
 
-# Configuración para la carga de imágenes
-UPLOAD_FOLDER = 'static/img/faces'
+
+# Image upload configuration
+UPLOAD_FOLDER = 'static/uploads/faces'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs('static/uploads/products', exist_ok=True)
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+
+def decode_image(image_data):
+    image_data = image_data.split(",")[1]
+    image = Image.open(BytesIO(base64.b64decode(image_data)))
+    return np.array(image)
+
+
 @app.route('/')
 def index():
-    return render_template('index.html')
+    if 'user_id' in session:
+        return redirect(url_for('dashboard'))
+    return render_template('login.html')
+@app.route('/settings')
+def settings():
+    if 'user_id' not in session:
+        return redirect(url_for('login_page'))
+    return render_template('settings.html',
+                         user_name=session['user_name'],
+                         user_role=session['user_role'],
+                         user_image=get_user_image(session['user_id']))
+@app.route('/users')
+def users():
+    if 'user_id' not in session:
+        return redirect(url_for('login_page'))
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        email = request.form['email']
-        password = request.form['password']
-        user = User.get_user_by_email(email)
-        if user and user.password == password:  # Asegúrate de encriptar las contraseñas en producción
-            flash('Inicio de sesión exitoso', 'success')
-            return redirect(url_for('index'))
-        else:
-            flash('Credenciales inválidas', 'danger')
-    return render_template('auth/login.html')
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
 
+        # Verificar si el usuario actual es administrador
+        cursor.execute('SELECT role FROM users WHERE id = %s', (session['user_id'],))
+        current_user = cursor.fetchone()
+        # Obtener todos los usuarios con su última sesión
+        cursor.execute('''
+            SELECT 
+                u.*,
+                MAX(l.login_time) as last_login
+            FROM users u
+            LEFT JOIN login_history l ON u.id = l.user_id
+            GROUP BY u.id
+            ORDER BY u.name
+        ''')
+        users = cursor.fetchall()
+
+        # Procesar las fechas y rutas de imágenes
+        for user in users:
+            user['created_at'] = user['created_at'].strftime('%d/%m/%Y %H:%M')
+            if user['last_login']:
+                user['last_login'] = user['last_login'].strftime('%d/%m/%Y %H:%M')
+            # Convertir la ruta de la imagen a relativa
+            if user['face_image_path']:
+                user['face_image_path'] = user['face_image_path'].replace('static/', '')
+
+        return render_template('users.html', users=users)
+
+    except mysql.connector.Error as err:
+        flash(f'Error al obtener usuarios: {err}', 'error')
+        return redirect(url_for('dashboard'))
+    finally:
+        conn.close()
+
+
+@app.route('/api/users', methods=['POST'])
+def create_user():
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'message': 'No autorizado'}), 401
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # Verificar si es administrador
+        cursor.execute('SELECT role FROM users WHERE id = %s', (session['user_id'],))
+        if cursor.fetchone()['role'] != 'admin':
+            return jsonify({'success': False, 'message': 'No autorizado'}), 403
+
+        data = request.get_json()
+        required_fields = ['name', 'email', 'password', 'role']
+        if not all(field in data for field in required_fields):
+            return jsonify({'success': False, 'message': 'Faltan campos requeridos'}), 400
+
+        # Verificar si el email ya existe
+        cursor.execute('SELECT id FROM users WHERE email = %s', (data['email'],))
+        if cursor.fetchone():
+            return jsonify({'success': False, 'message': 'El email ya está registrado'}), 400
+
+        # Crear el usuario
+        cursor.execute('''
+            INSERT INTO users (name, email, password, role, active, created_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+        ''', (data['name'], data['email'], data['password'], data['role'], data.get('active', 1)))
+
+        conn.commit()
+        return jsonify({'success': True, 'message': 'Usuario creado exitosamente'})
+
+    except mysql.connector.Error as err:
+        return jsonify({'success': False, 'message': str(err)}), 500
+    finally:
+        conn.close()
+
+
+@app.route('/api/users/<int:user_id>', methods=['GET', 'PUT', 'DELETE'])
+def manage_user(user_id):
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'message': 'No autorizado'}), 401
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # Verificar si es administrador (excepto para GET de su propio usuario)
+        if request.method != 'GET' or user_id != session['user_id']:
+            cursor.execute('SELECT role FROM users WHERE id = %s', (session['user_id'],))
+            if cursor.fetchone()['role'] != 'admin':
+                return jsonify({'success': False, 'message': 'No autorizado'}), 403
+
+        if request.method == 'GET':
+            cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))
+            user = cursor.fetchone()
+            if user:
+                # Remover datos sensibles
+                del user['password']
+                del user['face_encoding']
+                return jsonify(user)
+            return jsonify({'success': False, 'message': 'Usuario no encontrado'}), 404
+
+        elif request.method == 'PUT':
+            data = request.get_json()
+
+            # Verificar que no sea el último administrador
+            if data.get('role') == 'user' or not data.get('active', True):
+                cursor.execute('SELECT COUNT(*) as admin_count FROM users WHERE role = "admin" AND active = 1')
+                if cursor.fetchone()['admin_count'] <= 1:
+                    return jsonify({'success': False,
+                                    'message': 'No se puede modificar el último administrador activo'}), 400
+
+            # Construir la consulta de actualización
+            update_fields = []
+            params = []
+            for field in ['name', 'email', 'role']:
+                if field in data:
+                    update_fields.append(f'{field} = %s')
+                    params.append(data[field])
+
+            if 'password' in data and data['password']:
+                update_fields.append('password = %s')
+                params.append(data['password'])
+
+            if 'active' in data:
+                update_fields.append('active = %s')
+                params.append(data['active'])
+
+            params.append(user_id)
+
+            query = f'''
+                UPDATE users 
+                SET {', '.join(update_fields)}
+                WHERE id = %s
+            '''
+
+            cursor.execute(query, params)
+            conn.commit()
+
+            return jsonify({'success': True, 'message': 'Usuario actualizado exitosamente'})
+
+        elif request.method == 'DELETE':
+            # Verificar que no sea el último administrador
+            cursor.execute('''
+                SELECT COUNT(*) as admin_count 
+                FROM users 
+                WHERE role = 'admin' AND active = 1 AND id != %s
+            ''', (user_id,))
+
+            if cursor.fetchone()['admin_count'] == 0:
+                return jsonify({'success': False,
+                                'message': 'No se puede eliminar el último administrador'}), 400
+
+            # Desactivar en lugar de eliminar
+            cursor.execute('UPDATE users SET active = 0 WHERE id = %s', (user_id,))
+            conn.commit()
+
+            return jsonify({'success': True, 'message': 'Usuario desactivado exitosamente'})
+
+    except mysql.connector.Error as err:
+        return jsonify({'success': False, 'message': str(err)}), 500
+    finally:
+        conn.close()
+def get_user_image(user_id):
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute('SELECT face_image_path FROM users WHERE id = %s', (user_id,))
+    user = cursor.fetchone()
+    conn.close()
+    return os.path.basename(user['face_image_path']) if user and user['face_image_path'] else 'default.jpg'
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        nombre = request.form['nombre']
+        name = request.form['name']
         email = request.form['email']
         password = request.form['password']
-        rol = request.form['rol']
+        role = request.form['role']
 
-        # Manejo de la imagen del rostro
-        if 'face_image' not in request.files:
-            flash('No se subió ninguna imagen', 'danger')
-            return redirect(url_for('register'))
-        
-        file = request.files['face_image']
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
+        if 'face_image_data' not in request.form or not request.form['face_image_data']:
+            flash('No facial image provided', 'error')
+            return redirect(request.url)
 
-            # Guardar el usuario en la base de datos
-            User.create_user(nombre, email, password, rol)
+        # Process face image
+        face_image_data = request.form['face_image_data']
+        image_data = base64.b64decode(face_image_data.split(",")[1])
+        image = Image.open(BytesIO(image_data))
 
-            flash('Usuario registrado exitosamente', 'success')
-            return redirect(url_for('login'))
-        else:
-            flash('Formato de imagen no permitido', 'danger')
-    return render_template('auth/register.html')
+        # Save image file
+        filename = secure_filename(f"{email}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg")
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        image.save(filepath)
 
-@app.route('/recognize', methods=['POST'])
-def recognize():
-    if request.method == 'POST':
-        # Aquí deberías manejar la lógica para recibir la imagen y procesarla
-        # Por simplicidad, asumimos que se sube una imagen y se procesa
-        uploaded_file = request.files['face_image']
-        if uploaded_file and allowed_file(uploaded_file.filename):
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(uploaded_file.filename))
-            uploaded_file.save(filepath)
+        # Process face recognition
+        image_np = np.array(image)
+        face_locations = face_recognition.face_locations(image_np)
 
-            # Aquí deberías tener una lista de codificaciones de rostros conocidos
-            known_face_encodings = []  # Lista de codificaciones de rostros conocidos
-            known_face_names = []       # Lista de nombres de rostros conocidos
+        if not face_locations:
+            os.remove(filepath)
+            flash('No face detected in the image', 'error')
+            return redirect(request.url)
 
-            # Lógica para reconocer la cara
-            name = recognize_face(filepath, known_face_encodings, known_face_names)
+        face_encoding = face_recognition.face_encodings(image_np, face_locations)[0]
 
-            flash(f'Rostro reconocido: {name}', 'success')
-            return redirect(url_for('index'))
-        else:
-            flash('Formato de imagen no permitido', 'danger')
-    return redirect(url_for('index'))
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO users (name, email, password, role, face_encoding, face_image_path)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            ''', (name, email, password, role, ','.join(map(str, face_encoding)), filepath))
+            conn.commit()
+            flash('Registration successful', 'success')
+            return redirect(url_for('login_page'))
+        except mysql.connector.Error as err:
+            flash(f'Registration error: {err}', 'error')
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            return redirect(request.url)
+        finally:
+            conn.close()
+
+    return render_template('register.html')
+
+
+@app.route('/login', methods=['GET'])
+def login_page():
+    return render_template('login.html')
+
+
+@app.route('/face_login', methods=['POST'])
+def face_login():
+    face_image_data = request.form['face_image_data']
+    image_np = decode_image(face_image_data)
+
+    face_locations = face_recognition.face_locations(image_np)
+    if not face_locations:
+        return jsonify({
+            'success': False,
+            'face_detected': False,
+            'message': 'No se detectó rostro'
+        })
+
+    login_encoding = face_recognition.face_encodings(image_np, face_locations)[0]
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute('SELECT * FROM users WHERE face_encoding IS NOT NULL')
+    users = cursor.fetchall()
+    conn.close()
+
+    for user in users:
+        stored_encoding = np.array([float(x) for x in user['face_encoding'].split(',')])
+        if face_recognition.compare_faces([stored_encoding], login_encoding, tolerance=0.6)[0]:
+            # Guardar datos en la sesión
+            session['user_id'] = user['id']
+            session['user_name'] = user['name']
+            session['user_role'] = user['role']
+            session['user_image'] = os.path.basename(user['face_image_path']) if user[
+                'face_image_path'] else 'default.jpg'
+
+            return jsonify({
+                'success': True,
+                'redirect': url_for('dashboard'),
+                'message': 'Login exitoso'
+            })
+
+    return jsonify({
+        'success': False,
+        'face_detected': True,
+        'match': False,
+        'message': 'Rostro no reconocido'
+    })
+
+
+@app.route('/traditional_login', methods=['POST'])
+def traditional_login():
+    email = request.form['email']
+    password = request.form['password']
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute('SELECT * FROM users WHERE email = %s AND password = %s', (email, password))
+    user = cursor.fetchone()
+    conn.close()
+
+    if user:
+        # Guardar datos en la sesión
+        session['user_id'] = user['id']
+        session['user_name'] = user['name']
+        session['user_role'] = user['role']
+        # Guardar la imagen en la sesión
+        session['user_image'] = os.path.basename(user['face_image_path']) if user['face_image_path'] else 'default.jpg'
+
+        flash('Login successful', 'success')
+        return redirect(url_for('dashboard'))
+    else:
+        flash('Invalid credentials', 'error')
+        return redirect(url_for('login_page'))
+
+@app.before_request
+def load_user_data():
+    if 'user_id' in session and ('user_name' not in session or 'user_image' not in session):
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute('''
+                SELECT name, role, face_image_path 
+                FROM users 
+                WHERE id = %s
+            ''', (session['user_id'],))
+            user = cursor.fetchone()
+            if user:
+                session['user_name'] = user['name']
+                session['user_role'] = user['role']
+                session['user_image'] = os.path.basename(user['face_image_path']) if user['face_image_path'] else 'default.jpg'
+        except Exception as e:
+            print(f"Error loading user data: {e}")
+        finally:
+            if 'conn' in locals():
+                conn.close()
+@app.route('/dashboard')
+def dashboard():
+    if 'user_id' not in session:
+        return redirect(url_for('login_page'))
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # Get user data
+    cursor.execute('SELECT * FROM users WHERE id = %s', (session['user_id'],))
+    user = cursor.fetchone()
+
+    # Get statistics
+    cursor.execute('SELECT COUNT(*) as total FROM products WHERE active = true')
+    total_products = cursor.fetchone()['total']
+
+    cursor.execute('SELECT COUNT(*) as total FROM users')
+    total_users = cursor.fetchone()['total']
+
+    # Get low stock products
+    cursor.execute('SELECT * FROM low_stock_products LIMIT 5')
+    low_stock_products = cursor.fetchall()
+
+    # Get recent products
+    cursor.execute('''
+        SELECT p.*, c.name as category_name 
+        FROM products p 
+        JOIN categories c ON p.category_id = c.id 
+        WHERE p.active = true
+        ORDER BY p.created_at DESC 
+        LIMIT 5
+    ''')
+    recent_products = cursor.fetchall()
+
+    # Get inventory value
+    cursor.execute('SELECT * FROM inventory_value')
+    inventory_stats = cursor.fetchall()
+
+    conn.close()
+
+    return render_template('dashboard.html',
+                           user_name=user['name'],
+                           user_role=user['role'],
+                           user_image=os.path.basename(user['face_image_path']),
+                           total_products=total_products,
+                           total_users=total_users,
+                           low_stock_products=low_stock_products,
+                           recent_products=recent_products,
+                           inventory_stats=inventory_stats)
+
 
 @app.route('/products', methods=['GET'])
 def list_products():
-    products = Product.get_all_products()
-    return render_template('products/list.html', products=products)
+    if 'user_id' not in session:
+        return redirect(url_for('login_page'))
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # Obtener parámetros de filtrado y paginación
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        search = request.args.get('search', '')
+        category_id = request.args.get('category_id', '')
+        sort_by = request.args.get('sort_by', 'name')
+        order = request.args.get('order', 'asc')
+
+        # Base query
+        query = '''
+            SELECT 
+                p.*,
+                c.name as category_name,
+                COALESCE(SUM(CASE WHEN m.movement_type = 'in' THEN m.quantity ELSE -m.quantity END), 0) as current_stock
+            FROM products p
+            LEFT JOIN categories c ON p.category_id = c.id
+            LEFT JOIN inventory_movements m ON p.id = m.product_id
+        '''
+        count_query = 'SELECT COUNT(*) as total FROM products p'
+        where_clauses = ['p.active = true']
+        params = []
+
+        # Agregar condiciones de búsqueda
+        if search:
+            where_clauses.append('(p.name LIKE %s OR p.code LIKE %s OR p.description LIKE %s)')
+            search_param = f'%{search}%'
+            params.extend([search_param, search_param, search_param])
+
+        if category_id:
+            where_clauses.append('p.category_id = %s')
+            params.append(category_id)
+
+        # Agregar WHERE a las queries
+        if where_clauses:
+            query += ' WHERE ' + ' AND '.join(where_clauses)
+            count_query += ' WHERE ' + ' AND '.join(where_clauses)
+
+        # Agregar GROUP BY y ORDER BY
+        query += ' GROUP BY p.id'
+
+        # Validar sort_by para prevenir SQL injection
+        valid_sort_columns = ['name', 'code', 'current_stock', 'purchase_price', 'sale_price', 'created_at']
+        if sort_by not in valid_sort_columns:
+            sort_by = 'name'
+
+        order = 'asc' if order.lower() != 'desc' else 'desc'
+        query += f' ORDER BY {sort_by} {order}'
+
+        # Agregar paginación
+        offset = (page - 1) * per_page
+        query += ' LIMIT %s OFFSET %s'
+        params.extend([per_page, offset])
+
+        # Ejecutar queries
+        cursor.execute(count_query, params[:-2])  # Excluir parámetros de LIMIT y OFFSET
+        total_products = cursor.fetchone()['total']
+
+        cursor.execute(query, params)
+        products = cursor.fetchall()
+
+        # Calcular total de páginas
+        total_pages = (total_products + per_page - 1) // per_page
+
+        # Obtener categorías para el filtro
+        cursor.execute('SELECT id, name FROM categories WHERE active = true ORDER BY name')
+        categories = cursor.fetchall()
+
+        # Obtener estadísticas
+        cursor.execute('''
+            SELECT 
+                COUNT(*) as total_products,
+                SUM(CASE WHEN stock <= minimum_stock THEN 1 ELSE 0 END) as low_stock_count,
+                SUM(stock * purchase_price) as total_inventory_value
+            FROM products 
+            WHERE active = true
+        ''')
+        stats = cursor.fetchone()
+
+        # Procesar los productos
+        for product in products:
+            # Agregar estado de stock
+            product['stock_status'] = 'low' if product['current_stock'] <= product['minimum_stock'] else 'normal'
+
+            # Calcular margen de ganancia
+            if product['purchase_price'] > 0:
+                product['profit_margin'] = ((product['sale_price'] - product['purchase_price']) / product[
+                    'purchase_price']) * 100
+            else:
+                product['profit_margin'] = 0
+
+            # Formatear fechas
+            product['created_at'] = product['created_at'].strftime('%d/%m/%Y %H:%M')
+            if product['updated_at']:
+                product['updated_at'] = product['updated_at'].strftime('%d/%m/%Y %H:%M')
+
+        return render_template('products/list.html',
+                               products=products,
+                               categories=categories,
+                               stats=stats,
+                               pagination={
+                                   'page': page,
+                                   'per_page': per_page,
+                                   'total_pages': total_pages,
+                                   'total_products': total_products
+                               },
+                               filters={
+                                   'search': search,
+                                   'category_id': category_id,
+                                   'sort_by': sort_by,
+                                   'order': order
+                               })
+
+    except mysql.connector.Error as err:
+        flash(f'Error al obtener los productos: {err}', 'error')
+        return redirect(url_for('dashboard'))
+
+    finally:
+        conn.close()
+
+
+@app.route('/api/products/search', methods=['GET'])
+def search_products():
+    """API endpoint para búsqueda en tiempo real de productos"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'No autorizado'}), 401
+
+    try:
+        search = request.args.get('q', '')
+        category_id = request.args.get('category_id', '')
+
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        query = '''
+            SELECT 
+                p.id, p.code, p.name, p.stock, p.minimum_stock,
+                c.name as category_name
+            FROM products p
+            LEFT JOIN categories c ON p.category_id = c.id
+            WHERE p.active = true
+        '''
+        params = []
+
+        if search:
+            query += ' AND (p.name LIKE %s OR p.code LIKE %s)'
+            search_param = f'%{search}%'
+            params.extend([search_param, search_param])
+
+        if category_id:
+            query += ' AND p.category_id = %s'
+            params.append(category_id)
+
+        query += ' LIMIT 10'  # Limitar resultados para mejor rendimiento
+
+        cursor.execute(query, params)
+        products = cursor.fetchall()
+
+        return jsonify({
+            'results': products
+        })
+
+    except mysql.connector.Error as err:
+        return jsonify({'error': str(err)}), 500
+
+    finally:
+        conn.close()
+
+
+@app.route('/api/products/export', methods=['GET'])
+def export_products():
+    """Endpoint para exportar productos a Excel"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'No autorizado'}), 401
+
+    try:
+        import pandas as pd
+        from io import BytesIO
+
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # Obtener todos los productos con sus categorías
+        cursor.execute('''
+            SELECT 
+                p.code, p.name, c.name as category, p.description,
+                p.stock, p.minimum_stock, p.purchase_price, p.sale_price,
+                p.created_at, p.updated_at,
+                CASE WHEN p.active THEN 'Activo' ELSE 'Inactivo' END as status
+            FROM products p
+            LEFT JOIN categories c ON p.category_id = c.id
+            ORDER BY p.name
+        ''')
+        products = cursor.fetchall()
+
+        # Crear DataFrame
+        df = pd.DataFrame(products)
+
+        # Crear archivo Excel
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, sheet_name='Productos', index=False)
+
+            # Dar formato al archivo
+            workbook = writer.book
+            worksheet = writer.sheets['Productos']
+
+            # Formatos
+            header_format = workbook.add_format({
+                'bold': True,
+                'bg_color': '#4B5563',
+                'font_color': 'white'
+            })
+
+            # Aplicar formatos
+            for col_num, value in enumerate(df.columns.values):
+                worksheet.write(0, col_num, value, header_format)
+                worksheet.set_column(col_num, col_num, 15)
+
+        output.seek(0)
+
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=f'productos_{datetime.now().strftime("%Y%m%d")}.xlsx'
+        )
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
 
 @app.route('/products/create', methods=['GET', 'POST'])
 def create_product():
+    if 'user_id' not in session:
+        return redirect(url_for('login_page'))
+
     if request.method == 'POST':
-        nombre = request.form['nombre']
-        descripcion = request.form['descripcion']
-        categoria = request.form['categoria']
-        codigo_barras = request.form['codigo_barras']
-        imagen = request.form['imagen']  # Aquí deberías manejar la carga de la imagen
+        try:
+            # Obtener datos del formulario
+            code = request.form['code']
+            name = request.form['name']
+            description = request.form.get('description', '')
+            category_id = int(request.form['category_id'])
+            purchase_price = float(request.form['purchase_price'])
+            sale_price = float(request.form['sale_price'])
+            stock = int(request.form['stock'])
+            minimum_stock = int(request.form['minimum_stock'])
 
-        Product.create_product(nombre, descripcion, categoria, codigo_barras, imagen)
-        flash('Producto creado exitosamente', 'success')
-        return redirect(url_for('list_products'))
-    
-    return render_template('products/create.html')
+            # Procesar imagen si existe
+            image_path = None
+            if 'image' in request.files:
+                file = request.files['image']
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(
+                        f"product_{code}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{file.filename.rsplit('.', 1)[1].lower()}")
+                    filepath = os.path.join('static/uploads/products', filename)
 
-@app.route('/products/edit/<int:product_id>', methods=['GET', 'POST'])
-def edit_product(product_id):
-    product = Product.get_product_by_id(product_id)
-    if request.method == 'POST':
-        nombre = request.form['nombre']
-        descripcion = request.form['descripcion']
-        categoria = request.form['categoria']
-        codigo_barras = request.form['codigo_barras']
-        imagen = request.form['imagen']  # Aquí deberías manejar la carga de la imagen
+                    # Asegurar que el directorio existe
+                    os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-        Product.update_product(product_id, nombre, descripcion, categoria, codigo_barras, imagen)
-        flash('Producto actualizado exitosamente', 'success')
-        return redirect(url)
-@app.route('/products/delete/<int:product_id>', methods=['POST'])
-def delete_product(product_id):
-    Product.delete_product(product_id)
-    flash('Producto eliminado exitosamente', 'success')
-    return redirect(url_for('list_products'))
+                    # Guardar y optimizar imagen
+                    image = Image.open(file)
+                    image.thumbnail((800, 800))  # Redimensionar si es muy grande
+                    image.save(filepath, quality=85, optimize=True)
+                    image_path = filepath
+
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            # Verificar si el código ya existe
+            cursor.execute('SELECT id FROM products WHERE code = %s', (code,))
+            if cursor.fetchone():
+                flash('El código del producto ya existe', 'error')
+                return redirect(request.url)
+
+            # Insertar el producto
+            cursor.execute('''
+                INSERT INTO products (code, name, description, category_id, 
+                                    purchase_price, sale_price, stock, 
+                                    minimum_stock, image, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            ''', (code, name, description, category_id, purchase_price,
+                  sale_price, stock, minimum_stock, image_path))
+
+            # Registrar el movimiento inicial de stock
+            product_id = cursor.lastrowid
+            if stock > 0:
+                cursor.execute('''
+                    INSERT INTO inventory_movements (product_id, movement_type, 
+                                                   quantity, user_id, description)
+                    VALUES (%s, 'in', %s, %s, %s)
+                ''', (product_id, stock, session['user_id'], 'Stock inicial'))
+
+            conn.commit()
+            flash('Producto creado exitosamente', 'success')
+            return redirect(url_for('list_products'))
+
+        except mysql.connector.Error as err:
+            flash(f'Error al crear el producto: {err}', 'error')
+            return redirect(request.url)
+
+        except Exception as e:
+            flash(f'Error inesperado: {e}', 'error')
+            return redirect(request.url)
+
+        finally:
+            conn.close()
+
+    # GET request - mostrar formulario
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute('SELECT id, name FROM categories WHERE active = true ORDER BY name')
+    categories = cursor.fetchall()
+    conn.close()
+
+    return render_template('products/create.html', categories=categories)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('Logged out successfully', 'success')
+    return redirect(url_for('index'))
 
 if __name__ == '__main__':
     app.run(debug=True)

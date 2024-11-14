@@ -1,0 +1,269 @@
+<!-- templates/users.html -->
+{% extends "layouts/base.html" %}
+
+{% block title %}Usuarios - Sistema de Inventario{% endblock %}
+
+{% block page_title %}Gestión de Usuarios{% endblock %}
+
+{% block top_buttons %}
+<button onclick="openCreateModal()" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 flex items-center">
+    <i class="fas fa-plus mr-2"></i>Nuevo Usuario
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="bg-white rounded-lg shadow-md">
+    <!-- Filtros y búsqueda -->
+    <div class="p-4 border-b">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center space-x-4">
+                <div class="relative">
+                    <input type="text" id="search" placeholder="Buscar usuarios..."
+                           class="pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+                </div>
+                <select id="role-filter" class="border rounded-lg px-4 py-2">
+                    <option value="">Todos los roles</option>
+                    <option value="admin">Administrador</option>
+                    <option value="user">Usuario</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabla de usuarios -->
+    <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usuario</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rol</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Último Acceso</th>
+                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Acciones</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                {% for user in users %}
+                <tr>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0 h-10 w-10">
+                                {% if user.face_image_path %}
+                                <img class="h-10 w-10 rounded-full object-cover"
+                                     src="{{ url_for('static', filename=user.face_image_path) }}"
+                                     alt="{{ user.name }}">
+                                {% else %}
+                                <div class="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
+                                    <i class="fas fa-user text-gray-400"></i>
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="ml-4">
+                                <div class="text-sm font-medium text-gray-900">{{ user.name }}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <div class="text-sm text-gray-900">{{ user.email }}</div>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
+                                   {% if user.role == 'admin' %}bg-purple-100 text-purple-800{% else %}bg-blue-100 text-blue-800{% endif %}">
+                            {{ user.role|title }}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
+                                   {% if user.active %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
+                            {{ "Activo" if user.active else "Inactivo" }}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {{ user.last_login|format_date if user.last_login else "Nunca" }}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <button onclick="editUser({{ user.id }})"
+                                class="text-indigo-600 hover:text-indigo-900 mr-3">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        {% if user.id != session.user_id %}
+                        <button onclick="confirmDelete({{ user.id }})"
+                                class="text-red-600 hover:text-red-900">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Modal de Crear/Editar Usuario -->
+<div id="userModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden items-center justify-center">
+    <div class="bg-white rounded-lg p-8 max-w-md w-full mx-4">
+        <h3 class="text-lg font-bold mb-4" id="modalTitle">Nuevo Usuario</h3>
+        <form id="userForm" class="space-y-4">
+            <input type="hidden" name="user_id" id="userId">
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Nombre</label>
+                <input type="text" name="name" id="userName" required
+                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Email</label>
+                <input type="email" name="email" id="userEmail" required
+                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Contraseña</label>
+                <input type="password" name="password" id="userPassword"
+                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                <p class="mt-1 text-sm text-gray-500" id="passwordHelp">Dejar en blanco para mantener la actual</p>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Rol</label>
+                <select name="role" id="userRole" required
+                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                    <option value="user">Usuario</option>
+                    <option value="admin">Administrador</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Estado</label>
+                <div class="mt-2">
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="active" value="1" checked
+                               class="form-radio h-4 w-4 text-blue-600">
+                        <span class="ml-2">Activo</span>
+                    </label>
+                    <label class="inline-flex items-center ml-6">
+                        <input type="radio" name="active" value="0"
+                               class="form-radio h-4 w-4 text-blue-600">
+                        <span class="ml-2">Inactivo</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-3 mt-6">
+                <button type="button" onclick="closeModal()"
+                        class="px-4 py-2 border rounded-md text-gray-700 hover:bg-gray-50">
+                    Cancelar
+                </button>
+                <button type="submit"
+                        class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                    Guardar
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const userModal = document.getElementById('userModal');
+const userForm = document.getElementById('userForm');
+let deleteUserId = null;
+
+function openCreateModal() {
+    document.getElementById('modalTitle').textContent = 'Nuevo Usuario';
+    userForm.reset();
+    document.getElementById('userId').value = '';
+    document.getElementById('passwordHelp').style.display = 'none';
+    userModal.classList.remove('hidden');
+    userModal.classList.add('flex');
+}
+
+function editUser(userId) {
+    fetch(`/api/users/${userId}`)
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('modalTitle').textContent = 'Editar Usuario';
+            document.getElementById('userId').value = data.id;
+            document.getElementById('userName').value = data.name;
+            document.getElementById('userEmail').value = data.email;
+            document.getElementById('userRole').value = data.role;
+            document.getElementsByName('active').forEach(radio => {
+                radio.checked = radio.value == data.active;
+            });
+            document.getElementById('passwordHelp').style.display = 'block';
+            userModal.classList.remove('hidden');
+            userModal.classList.add('flex');
+        });
+}
+
+function closeModal() {
+    userModal.classList.add('hidden');
+    userModal.classList.remove('flex');
+}
+
+userForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(userForm);
+    const userId = formData.get('user_id');
+    const method = userId ? 'PUT' : 'POST';
+    const url = userId ? `/api/users/${userId}` : '/api/users';
+
+    fetch(url, {
+        method: method,
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(Object.fromEntries(formData))
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.message);
+        }
+    });
+});
+
+function confirmDelete(userId) {
+    if (confirm('¿Está seguro de que desea eliminar este usuario?')) {
+        fetch(`/api/users/${userId}`, {
+            method: 'DELETE'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert(data.message);
+            }
+        });
+    }
+}
+
+// Búsqueda y filtrado
+document.getElementById('search').addEventListener('input', filterUsers);
+document.getElementById('role-filter').addEventListener('change', filterUsers);
+
+function filterUsers() {
+    const search = document.getElementById('search').value.toLowerCase();
+    const roleFilter = document.getElementById('role-filter').value;
+
+    document.querySelectorAll('tbody tr').forEach(row => {
+        const name = row.querySelector('td:first-child').textContent.toLowerCase();
+        const email = row.querySelector('td:nth-child(2)').textContent.toLowerCase();
+        const role = row.querySelector('td:nth-child(3)').textContent.toLowerCase();
+
+        const matchesSearch = name.includes(search) || email.includes(search);
+        const matchesRole = !roleFilter || role.includes(roleFilter.toLowerCase());
+
+        row.style.display = matchesSearch && matchesRole ? '' : 'none';
+    });
+}
+</script>
+{% endblock %}

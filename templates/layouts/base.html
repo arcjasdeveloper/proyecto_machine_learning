@@ -1,0 +1,109 @@
+<!-- templates/layouts/base.html -->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Sistema de Inventario{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="bg-gray-100">
+    <div class="flex min-h-screen">
+        <!-- Sidebar -->
+        <div class="bg-gray-800 text-white w-64 flex flex-col fixed h-full">
+            <div class="p-4 border-b border-gray-700">
+                <h2 class="text-xl font-bold">Sistema de Inventario</h2>
+            </div>
+            <div class="flex-1 overflow-y-auto">
+                <div class="p-4">
+                    {% if session.get('user_name') %}
+                    <div class="flex items-center mb-4 space-x-2">
+                        {% if session.get('user_image') %}
+                            <img src="{{ url_for('static', filename='uploads/faces/' + session.get('user_image', 'default.jpg')) }}"
+                             alt="Perfil"
+                             class="w-10 h-10 rounded-full">
+                        {% else %}
+                            <div class="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center">
+                                <i class="fas fa-user text-gray-300"></i>
+                            </div>
+                        {% endif %}
+                        <div>
+                            <p class="font-semibold">{{ session.get('user_name', 'Usuario') }}</p>
+                            <p class="text-sm text-gray-400">{{ session.get('user_role', 'Rol no definido') }}</p>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                <nav class="mt-4">
+                    <a href="{{ url_for('dashboard') }}"
+                       class="flex items-center px-4 py-3 text-gray-300 hover:bg-gray-700 {% if request.endpoint == 'dashboard' %}bg-gray-700{% endif %}">
+                        <i class="fas fa-home w-6"></i>
+                        <span>Dashboard</span>
+                    </a>
+                    <a href="{{ url_for('list_products') }}"
+                       class="flex items-center px-4 py-3 text-gray-300 hover:bg-gray-700 {% if request.endpoint == 'list_products' %}bg-gray-700{% endif %}">
+                        <i class="fas fa-box w-6"></i>
+                        <span>Productos</span>
+                    </a>
+                    <a href="{{ url_for('users') }}"
+                       class="flex items-center px-4 py-3 text-gray-300 hover:bg-gray-700 {% if request.endpoint == 'users' %}bg-gray-700{% endif %}">
+                        <i class="fas fa-users w-6"></i>
+                        <span>Usuarios</span>
+                    </a>
+                    <a href="{{ url_for('settings') }}"
+                       class="flex items-center px-4 py-3 text-gray-300 hover:bg-gray-700 {% if request.endpoint == 'settings' %}bg-gray-700{% endif %}">
+                        <i class="fas fa-cog w-6"></i>
+                        <span>Configuración</span>
+                    </a>
+                </nav>
+            </div>
+            <div class="p-4 border-t border-gray-700">
+                <a href="{{ url_for('logout') }}" class="flex items-center text-gray-300 hover:text-white">
+                    <i class="fas fa-sign-out-alt w-6"></i>
+                    <span>Cerrar Sesión</span>
+                </a>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="ml-64 flex-1">
+            <!-- Top Bar -->
+            <div class="bg-white shadow-md p-4">
+                <div class="flex justify-between items-center">
+                    <h1 class="text-2xl font-semibold">{% block page_title %}{% endblock %}</h1>
+                    <div class="flex items-center space-x-4">
+                        {% block top_buttons %}
+                        <button class="p-2 hover:bg-gray-100 rounded-full">
+                            <i class="fas fa-bell"></i>
+                        </button>
+                        <button class="p-2 hover:bg-gray-100 rounded-full">
+                            <i class="fas fa-envelope"></i>
+                        </button>
+                        {% endblock %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content Area -->
+            <div class="p-6">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="mb-4 p-4 rounded {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                                {{ message }}
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                {% block content %}{% endblock %}
+            </div>
+        </div>
+    </div>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
