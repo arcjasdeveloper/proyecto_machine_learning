@@ -1,0 +1,50 @@
+<!-- templates/orders/editar_pedido.html -->
+{% extends "layouts/base.html" %}
+
+{% block title %}Editar Detalle de Pedido - Sistema de Inventario{% endblock %}
+
+{% block page_title %}Editar Detalle de Pedido{% endblock %}
+
+{% block top_buttons %}
+<!-- Aquí puedes agregar botones para acciones como guardar, cancelar, etc. -->
+<a href="{{ url_for('listar_detalles', id_pedido=detalle['id_pedido']) }}" class="bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600 transition-colors duration-300">
+    Ver Detalles de Pedidos
+</a>
+{% endblock %}
+
+{% block content %}
+    <div class="container max-w-4xl mx-auto bg-white p-8 rounded-lg shadow-lg mt-10">
+        <h1 class="text-3xl font-semibold text-center text-blue-600 mb-6">Editar Detalle del Pedido</h1>
+        <form method="POST" class="space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="producto" class="block text-lg font-medium text-gray-700">Producto:</label>
+                    <input type="text" id="producto" name="producto" value="{{ detalle['id_producto'] }}" readonly class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" style="width: 100%;">
+                </div>
+
+                <div>
+                    <label for="cantidad" class="block text-lg font-medium text-gray-700">Cantidad:</label>
+                    <input type="number" id="cantidad" name="cantidad" value="{{ detalle['cantidad'] }}" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" style="width: 100%;" required>
+                </div>
+
+                <div>
+                    <label for="precio_unitario" class="block text-lg font-medium text-gray-700">Precio Unitario:</label>
+                    <input type="text" id="precio_unitario" name="precio_unitario" value="{{ detalle['precio_unitario'] }}" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" style="width: 100%;" required>
+                </div>
+
+                <div>
+                    <label for="subtotal" class="block text-lg font-medium text-gray-700">Subtotal:</label>
+                    <input type="text" id="subtotal" name="subtotal" value="{{ detalle['subtotal'] }}" readonly class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" style="width: 100%;">
+                </div>
+            </div>
+
+            <button type="submit" class="w-full py-3 bg-blue-500 text-white text-lg rounded-md hover:bg-blue-600 transition-colors duration-300">
+                Guardar Cambios
+            </button>
+            <a href="{{ url_for('listar_detalles', id_pedido=detalle['id_pedido']) }}" class="w-full py-3 bg-gray-500 text-white text-lg rounded-md hover:bg-gray-600 transition-colors duration-300 text-center block mt-4">
+                Cancelar
+            </a>
+        </form>
+    </div>
+{% endblock %}
+

@@ -11,9 +11,14 @@ Paso 2: Debes crear tu entorno virtual en el terminal de VSCODE.
 	
 Paso 2: Iniciar tu entorno y activa
 	- En el mismo terminal de vdcode
-	- En línea de código ejecuta: .\venv\Scripts\actívate -> remplace venv por el nombre de la carpeta que creaste.
+	- En línea de código ejecuta: .\venv\Scripts\activate -> remplace venv por el nombre de la carpeta que creaste.
 
 Paso 3: Instalar el requerimientos del sistema
 	- En el mismo terminal de vdcode
-	- En la línea de codigo ejecuta: pip install -r ".\requirements.txt"
+	- En la línea de codigo ejecuta: pip install -r ".\requirements.txt" -> es la ruta donde se encuentra el archivo requirements.txt
 	- Al final ejecuta el codgio: pip list -> para ver la lista de los paquetes que tiene que tener el proyecto.
+
+Paso 4: Intalar la libreria de github
+	- En el misma terminar ejecutamos el siguiente codigo
+	- pip install git+https://github.com/ageitgey/face_recognition_models
+	- Para instalar la libreria de face_recognition_models

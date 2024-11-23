@@ -1,0 +1,142 @@
+<!-- templates/orders/nuevo_pedido.html -->
+{% extends "layouts/base.html" %}
+
+{% block title %}Nuevo Pedido - Sistema de Inventario{% endblock %}
+
+{% block page_title %}Nuevo Pedido{% endblock %}
+
+{% block top_buttons %}
+    <a href="{{ url_for('listar_pedidos') }}" class="bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600">
+        Ver Pedidos Existentes
+    </a>
+{% endblock %}
+
+{% block content %}
+    <div class="container max-w-4xl mx-auto bg-white p-8 rounded-lg shadow-lg mt-10">
+        <h2 class="text-3xl font-semibold text-center text-blue-600 mb-6">Nuevo Pedido</h2>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="p-4 rounded mb-4 {{ 'bg-red-100 text-red-700' if category == 'error' else 'bg-green-100 text-green-700' }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST">          
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- Código (opcional) -->
+                <div class="mb-4">
+                    <label for="codigo" class="block text-lg font-medium text-gray-700">Código</label>
+                    <input type="text" name="codigo" id="codigo" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <!-- Datos del Cliente -->
+                <div>
+                    <label for="nombre_cliente" class="block text-lg font-medium text-gray-700">Nombre del Cliente</label>
+                    <input type="text" name="nombre_cliente" id="nombre_cliente" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                </div>
+                
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <!-- Tipo de Documento -->
+                <div class="mb-4">
+                    <label for="tipo_documento" class="block text-lg font-medium text-gray-700">Tipo de Documento</label>
+                    <select name="tipo_documento" id="tipo_documento" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                        <option value="">Seleccione un Tipo de Documento</option>
+                        <option value="dni">DNI</option>
+                        <option value="ruc">RUC</option>
+                    </select>
+                    
+                </div>            
+
+                <!-- Campos para DNI y RUC -->
+                <div class="mb-4" id="dni_field">
+                    <label for="dni" class="block text-lg font-medium text-gray-700">DNI</label>
+                    <input type="text" name="dni" id="dni" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div class="mb-4" id="ruc_field" style="display: none;">
+                    <label for="ruc" class="block text-lg font-medium text-gray-700">RUC</label>
+                    <input type="text" name="ruc" id="ruc" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <!-- ID del Vendedor -->
+                <div class="mb-4">
+                    <label for="id_vendedor" class="block text-lg font-medium text-gray-700">ID del Vendedor</label>
+                    <input type="text" name="id_vendedor" id="id_vendedor" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                </div> 
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <!-- Estado del Pedido -->
+                <div class="mb-4">
+                    <label for="estado_pedido" class="block text-lg font-medium text-gray-700">Estado del Pedido</label>
+                    <select name="estado_pedido" id="estado_pedido" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                        <option value="">Seleccione el Estado</option>
+                        <option value="pendiente">Pendiente</option>
+                        <option value="procesando">En Procesamiento</option>
+                        <option value="enviado">Enviado</option>
+                        <option value="entregado">Entregado</option>
+                    </select>
+                </div>
+
+                <!-- Método de Pago -->
+                <div class="mb-4">
+                    <label for="metodo_pago" class="block text-lg font-medium text-gray-700">Método de Pago</label>
+                    <select name="metodo_pago" id="metodo_pago" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                        <option value="">Seleccione el Método de Pago</option>
+                        <option value="tarjeta">Tarjeta de Crédito</option>
+                        <option value="efectivo">Efectivo</option>
+                        <option value="paypal">PayPal</option>
+                    </select>
+                </div>
+
+                <!-- Fecha del Pedido -->
+                <div>
+                    <label for="fecha_pedido" class="block text-lg font-medium text-gray-700">Fecha del Pedido</label>
+                    <input type="date" name="fecha_pedido" id="fecha_pedido" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- Total del Pedido -->
+                <div class="mb-4">
+                    <label for="total_pedido" class="block text-lg font-medium text-gray-700">Total del Pedido</label>
+                    <input type="number" name="total_pedido" id="total_pedido" class="w-full max-w-md p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                </div>
+                <div class="mb-4">
+                    <!-- Dirección de Envío -->
+                    <label for="direccion_envio" class="block text-lg font-medium text-gray-700">Dirección de Envío</label>
+                    <input type="text" name="direccion_envio" id="direccion_envio" class="w-full max-w-md p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                </div>
+            </div>
+
+            <!-- Observaciones -->
+            <div class="mb-4">
+                <label for="observaciones" class="block text-lg font-medium text-gray-700">Observaciones</label>
+                <textarea name="observaciones" id="observaciones" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" rows="4"></textarea>
+            </div>           
+
+            <button type="submit" class="w-full py-3 bg-green-500 text-white text-lg rounded-md hover:bg-green-600 transition-colors duration-300">
+                Realizar Pedido
+            </button>
+        </form>
+    </div>
+
+    <script>
+        // Toggle DNI / RUC fields visibility
+        const tipoDocumentoSelect = document.querySelector('[name="tipo_documento"]');
+        tipoDocumentoSelect.addEventListener('change', function () {
+            const dniField = document.getElementById('dni_field');
+            const rucField = document.getElementById('ruc_field');
+            if (this.value === 'dni') {
+                dniField.style.display = 'block';
+                rucField.style.display = 'none';
+            } else if (this.value === 'ruc') {
+                dniField.style.display = 'none';
+                rucField.style.display = 'block';
+            }
+        });
+    </script>
+{% endblock %}
