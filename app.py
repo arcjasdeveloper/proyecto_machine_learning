@@ -1,4 +1,5 @@
 import base64
+import dlib
 from datetime import datetime
 from io import BytesIO
 import numpy as np
@@ -8,6 +9,8 @@ import mysql.connector
 import os
 import face_recognition
 from werkzeug.utils import secure_filename
+from models.Pedidos import Pedidos
+from models.Detalles_Pedido import DetallePedido
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'
@@ -217,6 +220,7 @@ def get_user_image(user_id):
     user = cursor.fetchone()
     conn.close()
     return os.path.basename(user['face_image_path']) if user and user['face_image_path'] else 'default.jpg'
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
@@ -581,7 +585,7 @@ def search_products():
 
 @app.route('/api/products/export', methods=['GET'])
 def export_products():
-    """Endpoint para exportar productos a Excel"""
+    #Endpoint para exportar productos a Excel
     if 'user_id' not in session:
         return jsonify({'error': 'No autorizado'}), 401
 
@@ -735,6 +739,184 @@ def logout():
     session.clear()
     flash('Logged out successfully', 'success')
     return redirect(url_for('index'))
+
+from datetime import datetime
+import uuid
+
+# Ruta para listar pedidos
+@app.route('/listar_pedidos', methods=['GET'])
+def listar_pedidos():
+    pedidos = Pedidos.obtener_todos()  # Obtener todos los pedidos
+    return render_template('Pedidos/listar_pedidos.html', pedidos=pedidos)
+
+# Ruta para crear nuevo pedido
+@app.route('/pedidos/nuevo', methods=['GET', 'POST'])
+def nuevo_pedido():
+    if request.method == 'POST':
+        nombre_cliente = request.form['nombre_cliente']
+        codigo_pedido = request.form['codigo']
+        tipo_documento = request.form['tipo_documento']
+        dni = request.form['dni'] if tipo_documento == 'dni' else None
+        ruc = request.form['ruc'] if tipo_documento == 'ruc' else None
+        estado_pedido = request.form['estado_pedido']
+        total_pedido = float(request.form['total_pedido'])
+        direccion_envio = request.form['direccion_envio']
+        metodo_pago = request.form['metodo_pago']
+        id_vendedor = int(request.form['id_vendedor'])
+        observaciones = request.form['observaciones']
+
+        # Generar el código automáticamente si no se pasa
+        #codigo = str(uuid.uuid4())[:5]
+        fecha_pedido = datetime.now()  # Obtener la fecha actual
+
+        # Crear el objeto de pedido
+        pedido = Pedidos(nombre_cliente=nombre_cliente, tipo_documento=tipo_documento, dni=dni, ruc=ruc, estado_pedido=estado_pedido, total_pedido=total_pedido, direccion_envio=direccion_envio, metodo_pago=metodo_pago,
+            id_vendedor=id_vendedor, observaciones=observaciones, codigo=codigo_pedido, fecha_pedido=fecha_pedido
+        )
+        pedido.guardar()
+
+        flash('Pedido creado exitosamente')
+        return redirect(url_for('listar_pedidos'))  
+
+    return render_template('Pedidos/nuevo_pedido.html')
+
+@app.route('/pedidos/editar/<int:id_pedido>', methods=['GET', 'POST'])
+def editar_pedido(id_pedido):
+    # Obtener el pedido actual por su ID
+    pedido_actual = Pedidos.obtener_por_id(id_pedido)
+    if not pedido_actual:
+        return "Pedido no encontrado", 404
+
+    if request.method == 'POST':
+        # Obtener los datos del formulario
+        nombre_cliente = request.form.get('nombre_cliente')
+        tipo_documento = request.form.get('tipo_documento')
+        dni = request.form.get('dni') if tipo_documento == 'dni' else None
+        ruc = request.form.get('ruc') if tipo_documento == 'ruc' else None
+        estado_pedido = request.form.get('estado_pedido')
+        total_pedido = request.form.get('total_pedido')
+        direccion_envio = request.form.get('direccion_envio')
+        metodo_pago = request.form.get('metodo_pago')
+        id_vendedor = request.form.get('id_vendedor')
+        observaciones = request.form.get('observaciones')
+
+        # Validar los datos ingresados
+        if not nombre_cliente or not tipo_documento or not estado_pedido or not total_pedido or not direccion_envio or not metodo_pago or not id_vendedor:
+            flash("Todos los campos son obligatorios", "error")
+            return redirect(request.url)
+
+        try:
+            # Convertir datos donde sea necesario
+            total_pedido = float(total_pedido)
+            id_vendedor = int(id_vendedor)
+
+            # Crear un objeto con los datos actualizados
+            pedido = Pedidos(
+                id_pedido=id_pedido,
+                nombre_cliente=nombre_cliente,
+                tipo_documento=tipo_documento,
+                dni=dni,
+                ruc=ruc,
+                estado_pedido=estado_pedido,
+                total_pedido=total_pedido,
+                direccion_envio=direccion_envio,
+                metodo_pago=metodo_pago,
+                id_vendedor=id_vendedor,
+                observaciones=observaciones
+            )
+
+            # Llamar al método actualizar() sobre la instancia del pedido
+            pedido.actualizar()
+
+            flash("Pedido actualizado exitosamente", "success")
+            return redirect(url_for('listar_pedidos'))  # Redirigir a la lista de pedidos
+
+        except ValueError:
+            flash("Total del pedido y Vendedor deben ser valores numéricos válidos", "error")
+            return redirect(request.url)
+
+    return render_template('Pedidos/editar_pedido.html', pedido=pedido_actual)
+
+
+
+# Ruta para eliminar pedido
+@app.route('/pedidos/eliminar/<int:id_pedido>')
+def eliminar_pedido(id_pedido):
+    Pedidos.eliminar(id_pedido)
+    flash('Pedido eliminado exitosamente')
+    return redirect(url_for('listar_pedidos'))
+
+# Ruta para listar los detalles del pedido
+@app.route('/detalle_pedido/<int:id_pedido>', methods=['GET'])
+def listar_detalles(id_pedido):
+    detalles = DetallePedido.obtener_por_pedido(id_pedido)
+    return render_template('Detalles_Pedido/listar_detalles.html', detalles=detalles, id_pedido=id_pedido)
+
+
+# Ruta para agregar un nuevo detalle de pedido
+@app.route('/detalle_pedido/nuevo/<int:id_pedido>', methods=['GET', 'POST'])
+def nuevo_detalle(id_pedido):
+    if request.method == 'POST':
+        id_producto = request.form['id_producto']
+        cantidad = request.form['cantidad']
+        precio_unitario = request.form['precio_unitario']
+        
+        # Crear el detalle del pedido
+        detalle = DetallePedido(id_detalle=None, id_pedido=id_pedido, id_producto=id_producto, cantidad=cantidad, precio_unitario=precio_unitario)
+        detalle.guardar()
+        
+        flash('Detalle de pedido creado exitosamente')
+        
+        # Redirigir a la lista de detalles con el id_pedido
+        return redirect(url_for('listar_detalles', id_pedido=id_pedido))
+    
+    return render_template('Detalles_Pedido/nuevo_detalle.html', id_pedido=id_pedido)
+
+# Ruta para editar un detalle de pedido
+@app.route('/detalle_pedido/editar/<int:id_detalle>', methods=['GET', 'POST'])
+def editar_detalle(id_detalle):
+    # Obtener el detalle actual por su ID
+    detalle_actual = DetallePedido.obtener_detalle_por_id(id_detalle)
+    if not detalle_actual:
+        return "Detalle no encontrado", 404
+
+    if request.method == 'POST':
+        # Obtener datos del formulario
+        cantidad = request.form.get('cantidad')
+        precio_unitario = request.form.get('precio_unitario')
+
+        # Validar los datos ingresados
+        if not cantidad or not precio_unitario:
+            flash("Todos los campos son obligatorios", "error")
+            return redirect(request.url)
+
+        try:
+            cantidad = int(cantidad)
+            precio_unitario = float(precio_unitario)
+
+            # Crear un objeto con los datos actualizados
+            detalle = DetallePedido(
+                id_detalle=id_detalle,
+                id_pedido=detalle_actual['id_pedido'], 
+                id_producto=detalle_actual['id_producto'], 
+                cantidad=cantidad,
+                precio_unitario=precio_unitario
+            )
+            detalle.actualizar()
+            flash("Detalle actualizado exitosamente", "success")
+            return redirect(f"/detalle_pedido/{detalle_actual['id_pedido']}") 
+        except ValueError:
+            flash("Cantidad y precio deben ser números válidos", "error")
+            return redirect(request.url)
+
+    return render_template('Detalles_Pedido/editar_detalle.html', detalle=detalle_actual)
+
+# Ruta para eliminar un detalle de pedido
+@app.route('/detalle_pedido/eliminar/<int:id_detalle>')
+def eliminar_detalle(id_detalle):
+    DetallePedido.eliminar(id_detalle) 
+    flash('Detalle del pedido eliminado exitosamente') 
+    return redirect(url_for('listar_detalles', id_pedido=request.args.get('id_pedido')))
 
 if __name__ == '__main__':
     app.run(debug=True)

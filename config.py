@@ -1,11 +1,11 @@
-import mysql.connector
+import mysql.connector # type: ignore
 import os
 
 class Config:
     MYSQL_HOST = os.getenv('MYSQL_HOST', 'localhost')
     MYSQL_USER = os.getenv('MYSQL_USER', 'root')
-    MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'admin')
-    MYSQL_DB = os.getenv('MYSQL_DB', 'nombre_de_tu_base_de_datos')
+    MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', '')
+    MYSQL_DB = os.getenv('MYSQL_DB', 'warehouse')
 
     @staticmethod
     def get_db_connection():

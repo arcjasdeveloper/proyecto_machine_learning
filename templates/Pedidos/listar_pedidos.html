@@ -1,0 +1,127 @@
+<!-- templates/orders/listar_pedidos.html -->
+{% extends "layouts/base.html" %}
+
+{% block title %}Pedidos - Sistema de Inventario{% endblock %}
+
+{% block page_title %}Pedidos{% endblock %}
+
+{% block top_buttons %}
+<a href="{{ url_for('nuevo_pedido') }}" 
+   class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 flex items-center">
+    <i class="fas fa-plus mr-2"></i>Nuevo Pedido
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="bg-white rounded-lg shadow-md">
+    <!-- Filtros y búsqueda -->
+    <div class="overflow-x-auto">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div class="flex items-center w-full border rounded-lg shadow-sm">
+                <i class="fas fa-search pl-3 text-gray-400"></i>
+                <input type="text" id_pedido="search" placeholder="Buscar pedidos..." class="w-full pl-3 pr-4 py-2 focus:ring focus:ring-blue-300 outline-none">
+            </div>
+            <div class="flex gap-4">
+                <select class="border rounded-lg px-4 py-2 shadow-sm">
+                    <option value="">Todos los estados</option>
+                    <option value="pending">Pendientes</option>
+                    <option value="shipped">Enviados</option>
+                    <option value="delivered">Entregados</option>
+                </select>
+                <select class="border rounded-lg px-4 py-2 shadow-sm">
+                    <option value="all">Todos</option>
+                    <option value="recent">Recientes</option>
+                    <option value="completed">Completados</option>                
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabla de pedidos -->
+    <div class="overflow-x-auto">
+        <table class="table-auto w-full border-collapse border border-gray-300 mt-5">
+            <thead>
+                <tr class="bg-blue-500 text-white">
+                    <th class="px-4 py-2 border border-gray-300">Código</th>
+                    <th class="px-4 py-2 border border-gray-300">Nombre Cliente</th>
+                    <th class="px-4 py-2 border border-gray-300">Tipo Documento</th>
+                    <th class="px-4 py-2 border border-gray-300">DNI/RUC</th>
+                    <th class="px-4 py-2 border border-gray-300">Estado Pedido</th>
+                    <th class="px-4 py-2 border border-gray-300">Total Pedido</th>
+                    <th class="px-4 py-2 border border-gray-300">Dirección Envío</th>
+                    <th class="px-4 py-2 border border-gray-300">Método Pago</th>
+                    <th class="px-4 py-2 border border-gray-300">Productos</th>
+                    <th class="px-4 py-2 border border-gray-300">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pedido in pedidos %}
+                <tr class="bg-white hover:bg-gray-100">
+                    <td class="px-4 py-2 border border-gray-300">{{ pedido.codigo }}</td>
+                    <td class="px-4 py-2 border border-gray-300">{{ pedido.nombre_cliente }}</td>
+                    <td class="px-4 py-2 border border-gray-300">{{ pedido.tipo_documento }}</td>
+                    <td class="px-4 py-2 border border-gray-300">
+                        {% if pedido.tipo_documento == 'dni' %}
+                            {{ pedido.dni }}
+                        {% elif pedido.tipo_documento == 'ruc' %}
+                            {{ pedido.ruc }}
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-2 border border-gray-300 text-center">
+                        {% if pedido.estado_pedido == 'pending' %}
+                        <span class="bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs">Pendiente</span>
+                        {% elif pedido.estado_pedido == 'shipped' %}
+                        <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs">Enviado</span>
+                        {% else %}
+                        <span class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs">Entregado</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-2 border border-gray-300">${{ "%.2f"|format(pedido.total_pedido) }}</td>
+                    <td class="px-4 py-2 border border-gray-300">{{ pedido.direccion_envio }}</td>
+                    <td class="px-4 py-2 border border-gray-300">{{ pedido.metodo_pago }}</td>
+                    <td class="px-4 py-2 border border-gray-300">{{ pedido.productos }}</td>
+                    <td class="px-4 py-2 border border-gray-300 text-center">
+                        <div class="flex justify-center space-x-2">
+                            <a href="{{ url_for('listar_detalles', id_pedido=pedido.id_pedido) }}" 
+                               class="bg-green-500 text-white px-3 py-1 rounded-lg hover:bg-green-600">
+                                Detalles
+                            </a>
+                            <a href="{{ url_for('editar_pedido', id_pedido=pedido.id_pedido) }}" 
+                               class="bg-yellow-500 text-white px-3 py-1 rounded-lg hover:bg-yellow-600">
+                                Editar
+                            </a>
+                            <form action="{{ url_for('eliminar_pedido', id_pedido=pedido.id_pedido) }}" method="POST" 
+                                  onsubmit="return confirm('¿Estás seguro de eliminar este pedido?')">
+                                <button type="submit" class="bg-red-500 text-white px-3 py-1 rounded-lg hover:bg-red-600">
+                                    Eliminar
+                                </button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="10" class="text-center text-gray-500 py-4">
+                        No hay pedidos disponibles.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Paginación -->
+    <div class="px-6 py-4 border-t border-gray-200">
+        <div class="flex items-center justify-between">
+            <div class="text-sm text-gray-700">
+                Mostrando <span class="font-medium">1</span> a <span class="font-medium">10</span> de <span class="font-medium">{{ total_orders }}</span> resultados
+            </div>
+            <div class="flex space-x-2">
+                <button class="px-3 py-1 border rounded-md hover:bg-gray-50">Anterior</button>
+                <button class="px-3 py-1 border rounded-md bg-blue-50 text-blue-600">1</button>
+                <button class="px-3 py-1 border rounded-md hover:bg-gray-50">Siguiente</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
