@@ -25,7 +25,7 @@
             {% endif %}
         {% endwith %}
 
-        <form method="POST">          
+        <form method="POST">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <!-- Código (opcional) -->
                 <div class="mb-4">
@@ -38,7 +38,7 @@
                     <label for="nombre_cliente" class="block text-lg font-medium text-gray-700">Nombre del Cliente</label>
                     <input type="text" name="nombre_cliente" id="nombre_cliente" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
                 </div>
-                
+
             </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <!-- Tipo de Documento -->
@@ -49,8 +49,8 @@
                         <option value="dni">DNI</option>
                         <option value="ruc">RUC</option>
                     </select>
-                    
-                </div>            
+
+                </div>
 
                 <!-- Campos para DNI y RUC -->
                 <div class="mb-4" id="dni_field">
@@ -67,7 +67,7 @@
                 <div class="mb-4">
                     <label for="id_vendedor" class="block text-lg font-medium text-gray-700">ID del Vendedor</label>
                     <input type="text" name="id_vendedor" id="id_vendedor" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
-                </div> 
+                </div>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <!-- Estado del Pedido -->
@@ -116,7 +116,7 @@
             <div class="mb-4">
                 <label for="observaciones" class="block text-lg font-medium text-gray-700">Observaciones</label>
                 <textarea name="observaciones" id="observaciones" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" rows="4"></textarea>
-            </div>           
+            </div>
 
             <button type="submit" class="w-full py-3 bg-green-500 text-white text-lg rounded-md hover:bg-green-600 transition-colors duration-300">
                 Realizar Pedido

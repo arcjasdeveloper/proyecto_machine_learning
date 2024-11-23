@@ -1,0 +1,81 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}Predicción de Demanda{% endblock %}
+
+{% block page_title %}Predicción de Demanda{% endblock %}
+
+{% block content %}
+<div class="container mx-auto p-6 bg-white rounded-lg shadow-md">
+    <h4 class="text-lg font-semibold mb-4">Predicción de Demanda de Productos</h4>
+    <form id="predict-form" class="space-y-4">
+        <input type="number" name="producto_id" placeholder="ID del Producto" class="w-full p-3 border rounded" required>
+        <input type="number" name="mes" placeholder="Mes (1-12)" class="w-full p-3 border rounded" required>
+        <input type="number" name="dia" placeholder="Día (1-31)" class="w-full p-3 border rounded" required>
+        <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded">Predecir</button>
+    </form>
+    <div id="predict-result" class="mt-4 text-gray-700"></div>
+</div>
+
+<div class="container mx-auto p-6 bg-white rounded-lg shadow-md mt-6">
+    <h4 class="text-lg font-semibold">Historial de Predicciones</h4>
+    <table class="min-w-full mt-4 text-left border-collapse">
+        <thead>
+            <tr class="bg-gray-50">
+                <th class="px-4 py-2 border">Producto</th>
+                <th class="px-4 py-2 border">Fecha</th>
+                <th class="px-4 py-2 border">Predicción</th>
+            </tr>
+        </thead>
+        <tbody id="predictions-history">
+            <!-- Las predicciones se agregarán dinámicamente -->
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function addPredictionToHistory(producto_id, mes, dia, prediccion) {
+    const tableBody = document.getElementById('predictions-history');
+    const row = document.createElement('tr');
+    row.innerHTML = `
+        <td class="px-4 py-2 border">${producto_id}</td>
+        <td class="px-4 py-2 border">${dia}/${mes}</td>
+        <td class="px-4 py-2 border">${prediccion} unidades</td>
+    `;
+    tableBody.appendChild(row);
+}
+
+document.getElementById('predict-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const formData = new FormData(e.target);
+    const data = {
+        producto_id: parseInt(formData.get('producto_id')),
+        mes: parseInt(formData.get('mes')),
+        dia: parseInt(formData.get('dia'))
+    };
+
+    const resultDiv = document.getElementById('predict-result');
+    resultDiv.innerText = "Cargando predicción...";
+
+    try {
+        const response = await fetch('/api/predict_demand', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+        if (result.prediccion) {
+            resultDiv.innerText = `Demanda estimada: ${result.prediccion} unidades`;
+            addPredictionToHistory(data.producto_id, data.mes, data.dia, result.prediccion);
+        } else {
+            resultDiv.innerText = `Error: ${result.error}`;
+        }
+    } catch (error) {
+        resultDiv.innerText = `Error: ${error.message}`;
+    }
+});
+</script>
+{% endblock %}

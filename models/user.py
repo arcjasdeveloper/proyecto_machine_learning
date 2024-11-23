@@ -10,7 +10,7 @@ class User:
 
     @staticmethod
     def get_user_by_email(email):
-        conn = Config.get_db_connection()  # Llama al método estático de la clase Config
+        conn = Config.get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM usuarios WHERE email = %s", (email,))
         user_data = cursor.fetchone()
@@ -22,7 +22,7 @@ class User:
 
     @staticmethod
     def create_user(nombre, email, password, rol):
-        conn = Config.get_db_connection()  # Llama al método estático de la clase Config
+        conn = Config.get_db_connection()
         cursor = conn.cursor()
         cursor.execute("INSERT INTO usuarios (nombre, email, password, rol) VALUES (%s, %s, %s, %s)", 
                        (nombre, email, password, rol))

