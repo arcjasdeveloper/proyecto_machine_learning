@@ -10,9 +10,7 @@ import face_recognition
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key_here'  # Change this in production
-
-# Database configuration
+app.secret_key = 'your_secret_key_here'
 DB_CONFIG = {
     'host': 'localhost',
     'user': 'root',
@@ -25,7 +23,6 @@ def get_db_connection():
     return mysql.connector.connect(**DB_CONFIG)
 
 
-# Image upload configuration
 UPLOAD_FOLDER = 'static/uploads/faces'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -65,10 +62,8 @@ def users():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # Verificar si el usuario actual es administrador
         cursor.execute('SELECT role FROM users WHERE id = %s', (session['user_id'],))
         current_user = cursor.fetchone()
-        # Obtener todos los usuarios con su última sesión
         cursor.execute('''
             SELECT 
                 u.*,
@@ -117,12 +112,10 @@ def create_user():
         if not all(field in data for field in required_fields):
             return jsonify({'success': False, 'message': 'Faltan campos requeridos'}), 400
 
-        # Verificar si el email ya existe
         cursor.execute('SELECT id FROM users WHERE email = %s', (data['email'],))
         if cursor.fetchone():
             return jsonify({'success': False, 'message': 'El email ya está registrado'}), 400
 
-        # Crear el usuario
         cursor.execute('''
             INSERT INTO users (name, email, password, role, active, created_at)
             VALUES (%s, %s, %s, %s, %s, NOW())
@@ -146,7 +139,6 @@ def manage_user(user_id):
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # Verificar si es administrador (excepto para GET de su propio usuario)
         if request.method != 'GET' or user_id != session['user_id']:
             cursor.execute('SELECT role FROM users WHERE id = %s', (session['user_id'],))
             if cursor.fetchone()['role'] != 'admin':
@@ -156,7 +148,6 @@ def manage_user(user_id):
             cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))
             user = cursor.fetchone()
             if user:
-                # Remover datos sensibles
                 del user['password']
                 del user['face_encoding']
                 return jsonify(user)
@@ -165,14 +156,12 @@ def manage_user(user_id):
         elif request.method == 'PUT':
             data = request.get_json()
 
-            # Verificar que no sea el último administrador
             if data.get('role') == 'user' or not data.get('active', True):
                 cursor.execute('SELECT COUNT(*) as admin_count FROM users WHERE role = "admin" AND active = 1')
                 if cursor.fetchone()['admin_count'] <= 1:
                     return jsonify({'success': False,
                                     'message': 'No se puede modificar el último administrador activo'}), 400
 
-            # Construir la consulta de actualización
             update_fields = []
             params = []
             for field in ['name', 'email', 'role']:
@@ -202,7 +191,6 @@ def manage_user(user_id):
             return jsonify({'success': True, 'message': 'Usuario actualizado exitosamente'})
 
         elif request.method == 'DELETE':
-            # Verificar que no sea el último administrador
             cursor.execute('''
                 SELECT COUNT(*) as admin_count 
                 FROM users 
@@ -213,7 +201,6 @@ def manage_user(user_id):
                 return jsonify({'success': False,
                                 'message': 'No se puede eliminar el último administrador'}), 400
 
-            # Desactivar en lugar de eliminar
             cursor.execute('UPDATE users SET active = 0 WHERE id = %s', (user_id,))
             conn.commit()
 
@@ -242,7 +229,6 @@ def register():
             flash('No facial image provided', 'error')
             return redirect(request.url)
 
-        # Process face image
         face_image_data = request.form['face_image_data']
         image_data = base64.b64decode(face_image_data.split(",")[1])
         image = Image.open(BytesIO(image_data))
@@ -440,7 +426,6 @@ def list_products():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # Obtener parámetros de filtrado y paginación
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
         search = request.args.get('search', '')
@@ -448,7 +433,6 @@ def list_products():
         sort_by = request.args.get('sort_by', 'name')
         order = request.args.get('order', 'asc')
 
-        # Base query
         query = '''
             SELECT 
                 p.*,
@@ -462,7 +446,6 @@ def list_products():
         where_clauses = ['p.active = true']
         params = []
 
-        # Agregar condiciones de búsqueda
         if search:
             where_clauses.append('(p.name LIKE %s OR p.code LIKE %s OR p.description LIKE %s)')
             search_param = f'%{search}%'
@@ -472,15 +455,12 @@ def list_products():
             where_clauses.append('p.category_id = %s')
             params.append(category_id)
 
-        # Agregar WHERE a las queries
         if where_clauses:
             query += ' WHERE ' + ' AND '.join(where_clauses)
             count_query += ' WHERE ' + ' AND '.join(where_clauses)
 
-        # Agregar GROUP BY y ORDER BY
         query += ' GROUP BY p.id'
 
-        # Validar sort_by para prevenir SQL injection
         valid_sort_columns = ['name', 'code', 'current_stock', 'purchase_price', 'sale_price', 'created_at']
         if sort_by not in valid_sort_columns:
             sort_by = 'name'
@@ -488,26 +468,21 @@ def list_products():
         order = 'asc' if order.lower() != 'desc' else 'desc'
         query += f' ORDER BY {sort_by} {order}'
 
-        # Agregar paginación
         offset = (page - 1) * per_page
         query += ' LIMIT %s OFFSET %s'
         params.extend([per_page, offset])
 
-        # Ejecutar queries
-        cursor.execute(count_query, params[:-2])  # Excluir parámetros de LIMIT y OFFSET
+        cursor.execute(count_query, params[:-2])
         total_products = cursor.fetchone()['total']
 
         cursor.execute(query, params)
         products = cursor.fetchall()
 
-        # Calcular total de páginas
         total_pages = (total_products + per_page - 1) // per_page
 
-        # Obtener categorías para el filtro
         cursor.execute('SELECT id, name FROM categories WHERE active = true ORDER BY name')
         categories = cursor.fetchall()
 
-        # Obtener estadísticas
         cursor.execute('''
             SELECT 
                 COUNT(*) as total_products,
@@ -518,19 +493,15 @@ def list_products():
         ''')
         stats = cursor.fetchone()
 
-        # Procesar los productos
         for product in products:
-            # Agregar estado de stock
             product['stock_status'] = 'low' if product['current_stock'] <= product['minimum_stock'] else 'normal'
 
-            # Calcular margen de ganancia
             if product['purchase_price'] > 0:
                 product['profit_margin'] = ((product['sale_price'] - product['purchase_price']) / product[
                     'purchase_price']) * 100
             else:
                 product['profit_margin'] = 0
 
-            # Formatear fechas
             product['created_at'] = product['created_at'].strftime('%d/%m/%Y %H:%M')
             if product['updated_at']:
                 product['updated_at'] = product['updated_at'].strftime('%d/%m/%Y %H:%M')
