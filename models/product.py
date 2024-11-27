@@ -28,6 +28,15 @@ class Product:
         cursor.close()
         conn.close()
         return products
+    
+    @staticmethod
+    def obtener_todos():
+        db = Config.get_db_connection()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, name FROM products")
+        productos = cursor.fetchall()
+        db.close()
+        return productos
 
     @staticmethod
     def get_product_by_id(product_id):

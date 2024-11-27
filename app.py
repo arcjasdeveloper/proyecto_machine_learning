@@ -15,6 +15,7 @@ from PIL import Image
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
+from models.product import Product
 from models.Pedidos import Pedidos
 from models.Detalles_Pedido import DetallePedido
 
@@ -1043,20 +1044,32 @@ def listar_detalles(id_pedido):
 @app.route('/detalle_pedido/nuevo/<int:id_pedido>', methods=['GET', 'POST'])
 def nuevo_detalle(id_pedido):
     if request.method == 'POST':
-        id_producto = request.form['id_producto']
+        id_producto = request.form['id_producto']  # El ID seleccionado en el formulario
         cantidad = request.form['cantidad']
         precio_unitario = request.form['precio_unitario']
-        
+
         # Crear el detalle del pedido
-        detalle = DetallePedido(id_detalle=None, id_pedido=id_pedido, id_producto=id_producto, cantidad=cantidad, precio_unitario=precio_unitario)
+        detalle = DetallePedido(
+            id_detalle=None,
+            id_pedido=id_pedido,
+            id_producto=id_producto,
+            cantidad=cantidad,
+            precio_unitario=precio_unitario
+        )
         detalle.guardar()
-        
+
         flash('Detalle de pedido creado exitosamente')
-        
-        # Redirigir a la lista de detalles con el id_pedido
         return redirect(url_for('listar_detalles', id_pedido=id_pedido))
+
+    # Obtener todos los productos para el formulario
+    productos = Product.obtener_todos()
+
+    return render_template(
+        'Detalles_Pedido/nuevo_detalle.html', 
+        id_pedido=id_pedido, 
+        productos=productos
+    )
     
-    return render_template('Detalles_Pedido/nuevo_detalle.html', id_pedido=id_pedido)
 
 # Ruta para editar un detalle de pedido
 @app.route('/detalle_pedido/editar/<int:id_detalle>', methods=['GET', 'POST'])
