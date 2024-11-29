@@ -1,3 +1,4 @@
+from sqlite3 import Cursor
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
 from werkzeug.utils import secure_filename
 from functools import wraps
@@ -9,7 +10,6 @@ import numpy as np
 import pandas as pd
 import mysql.connector
 import joblib
-import dlib
 import face_recognition
 from PIL import Image
 from sklearn.model_selection import train_test_split
@@ -61,6 +61,7 @@ def require_role(allowed_roles):
             return f(*args, **kwargs)
         return wrapped
     return decorator
+
 @app.route('/products/update_stock', methods=['POST'])
 @require_role(['admin', 'stock_manager'])
 def update_stock():
@@ -84,7 +85,7 @@ def update_stock():
 @app.route('/predict_demand_page', methods=['GET'])
 def predict_demand_page():
     return render_template('predict_demand.html')
-@app.route('/api/predict_demand', methods=['POST'])
+@app.route('/api/predict_demand', methods=['GET'])
 def predict_demand():
     try:
         modelo = joblib.load("modelo_prediccion.pkl")
@@ -97,6 +98,7 @@ def predict_demand():
         return jsonify({'prediccion': int(prediccion[0])})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    
 @app.route('/train_model', methods=['GET'])
 def train_model():
     try:
@@ -621,6 +623,7 @@ def list_products():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
+        # Paginación y filtros
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
         search = request.args.get('search', '')
@@ -628,57 +631,52 @@ def list_products():
         sort_by = request.args.get('sort_by', 'name')
         order = request.args.get('order', 'asc')
 
-        query = '''
-            SELECT 
-                p.*,
-                c.name as category_name,
-                COALESCE(SUM(CASE WHEN m.movement_type = 'in' THEN m.quantity ELSE -m.quantity END), 0) as current_stock
-            FROM products p
-            LEFT JOIN categories c ON p.category_id = c.id
-            LEFT JOIN inventory_movements m ON p.id = m.product_id
-        '''
-        count_query = 'SELECT COUNT(*) as total FROM products p'
-        where_clauses = ['p.active = true']
-        params = []
-
-        if search:
-            where_clauses.append('(p.name LIKE %s OR p.code LIKE %s OR p.description LIKE %s)')
-            search_param = f'%{search}%'
-            params.extend([search_param, search_param, search_param])
-
-        if category_id:
-            where_clauses.append('p.category_id = %s')
-            params.append(category_id)
-
-        if where_clauses:
-            query += ' WHERE ' + ' AND '.join(where_clauses)
-            count_query += ' WHERE ' + ' AND '.join(where_clauses)
-
-        query += ' GROUP BY p.id'
-
         valid_sort_columns = ['name', 'code', 'current_stock', 'purchase_price', 'sale_price', 'created_at']
         if sort_by not in valid_sort_columns:
             sort_by = 'name'
 
-        order = 'asc' if order.lower() != 'desc' else 'desc'
-        query += f' ORDER BY {sort_by} {order}'
+        order = 'asc' if order != 'desc' else 'desc'
 
-        offset = (page - 1) * per_page
-        query += ' LIMIT %s OFFSET %s'
-        params.extend([per_page, offset])
+        # Consulta principal de productos
+        query = '''
+            SELECT 
+                p.*,
+                c.name as category_name,
+                COALESCE(SUM(CASE WHEN m.movement_type = 'in' THEN m.quantity ELSE 0 END), 0) -
+                COALESCE(SUM(CASE WHEN m.movement_type = 'out' THEN m.quantity ELSE 0 END), 0) as current_stock
+            FROM products p
+            LEFT JOIN categories c ON p.category_id = c.id
+            LEFT JOIN inventory_movements m ON p.id = m.product_id
+            WHERE p.active = true
+        '''
+        params = []
 
-        cursor.execute(count_query, params[:-2])
-        total_products = cursor.fetchone()['total']
+        if search:
+            query += ' AND (p.name LIKE %s OR p.code LIKE %s OR p.description LIKE %s)'
+            search_param = f'%{search}%'
+            params.extend([search_param, search_param, search_param])
 
+        if category_id:
+            query += ' AND p.category_id = %s'
+            params.append(category_id)
+
+        query += f' GROUP BY p.id ORDER BY {sort_by} {order} LIMIT %s OFFSET %s'
+        params.extend([per_page, (page - 1) * per_page])
+
+        # Consultar productos
         cursor.execute(query, params)
         products = cursor.fetchall()
 
-        total_pages = (total_products + per_page - 1) // per_page
+        # Obtener estadísticas
+        cursor.execute('SELECT COUNT(*) as total FROM products p WHERE p.active = true')
+        total_products = cursor.fetchone()['total']
 
+        # Obtener categorías para el filtro
         cursor.execute('SELECT id, name FROM categories WHERE active = true ORDER BY name')
         categories = cursor.fetchall()
 
-        cursor.execute('''
+        # Consultar estadísticas generales
+        cursor.execute(''' 
             SELECT 
                 COUNT(*) as total_products,
                 SUM(CASE WHEN stock <= minimum_stock THEN 1 ELSE 0 END) as low_stock_count,
@@ -688,35 +686,48 @@ def list_products():
         ''')
         stats = cursor.fetchone()
 
+        # Sistema experto: recomendaciones basadas en la categoría
+        recommended_products = []
         for product in products:
-            product['stock_status'] = 'low' if product['current_stock'] <= product['minimum_stock'] else 'normal'
+            # Obtener productos relacionados de la misma categoría, incluyendo el cálculo de stock
+            cursor.execute('''
+                SELECT 
+                    p.*,
+                    COALESCE(SUM(CASE WHEN m.movement_type = 'in' THEN m.quantity ELSE 0 END), 0) -
+                    COALESCE(SUM(CASE WHEN m.movement_type = 'out' THEN m.quantity ELSE 0 END), 0) AS current_stock
+                FROM products p
+                LEFT JOIN inventory_movements m ON p.id = m.product_id
+                WHERE p.category_id = %s AND p.id != %s AND p.active = true
+                GROUP BY p.id
+            ''', (product['category_id'], product['id']))
+            
+            related_products = cursor.fetchall()
+            
+            # Guardar los productos recomendados de este producto
+            product['related_products'] = related_products
+            recommended_products.append(product)
 
-            if product['purchase_price'] > 0:
-                product['profit_margin'] = ((product['sale_price'] - product['purchase_price']) / product[
-                    'purchase_price']) * 100
-            else:
-                product['profit_margin'] = 0
+        # Calcular las páginas de productos
+        total_pages = (total_products + per_page - 1) // per_page
 
-            product['created_at'] = product['created_at'].strftime('%d/%m/%Y %H:%M')
-            if product['updated_at']:
-                product['updated_at'] = product['updated_at'].strftime('%d/%m/%Y %H:%M')
-
+        # Renderizar la plantilla con productos y recomendaciones
         return render_template('products/list.html',
-                               products=products,
-                               categories=categories,
-                               stats=stats,
-                               pagination={
-                                   'page': page,
-                                   'per_page': per_page,
-                                   'total_pages': total_pages,
-                                   'total_products': total_products
-                               },
-                               filters={
-                                   'search': search,
-                                   'category_id': category_id,
-                                   'sort_by': sort_by,
-                                   'order': order
-                               })
+                       products=products,
+                       categories=categories,
+                       stats=stats,
+                       recommendations=recommended_products,  # Pasar las recomendaciones al frontend
+                       pagination={
+                           'page': page,
+                           'per_page': per_page,
+                           'total_pages': total_pages,
+                           'total_products': total_products
+                       },
+                       filters={
+                           'search': search,
+                           'category_id': category_id,
+                           'sort_by': sort_by,
+                           'order': order
+                       })
 
     except mysql.connector.Error as err:
         flash(f'Error al obtener los productos: {err}', 'error')
@@ -725,6 +736,32 @@ def list_products():
     finally:
         conn.close()
 
+@app.route('/product/<int:product_id>')
+def product_detail(product_id):
+    # Establecer la conexión a la base de datos
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # Ejecutar la consulta para obtener los detalles del producto
+    cursor.execute("SELECT * FROM products WHERE id = %s", (product_id,))
+    product = cursor.fetchone()
+
+    if product:
+        # Convertir la tupla en un diccionario para facilitar el acceso
+        product_dict = {
+            'id': product[0],
+            'name': product[1],
+            'description': product[2],
+            'price': product[3],
+            'current_stock': product[4],
+            'minimum_stock': product[5],
+            'category_name': product[6],
+            'image_url': product[7]
+        }
+        return render_template('products/product_detail.html', product=product_dict)
+    else:
+        flash('Producto no encontrado', 'error')
+        return redirect(url_for('products_list'))
+   
 
 @app.route('/api/products/search', methods=['GET'])
 def search_products():
@@ -923,13 +960,42 @@ def create_product():
     conn.close()
 
     return render_template('products/create.html', categories=categories)
+"""
+@app.route('/products/edit/<int:product_id>', methods=['GET', 'POST'])
+@require_role(['admin', 'stock_manager'])
+def edit_product1(product_id):
+    if request.method == 'POST':
+        # Aquí va el manejo del formulario de edición
+        pass
+    else:
+        # Obtener el producto y las categorías
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute('SELECT * FROM products WHERE id = %s', (product_id,))
+        product = cursor.fetchone()
+        
+        cursor.execute('SELECT * FROM categories')
+        categories = cursor.fetchall()
+
+        # Calcular el nivel óptimo de stock
+        nivel_optimo = Product.calcular_nivel_optimo_stock(product_id)
+        
+        conn.close()
+
+        return render_template(
+            'edit.html',
+            product=product,
+            categories=categories,
+            nivel_optimo=nivel_optimo  # Pasar el nivel óptimo a la plantilla
+        )
+
+"""
 
 @app.route('/logout')
 def logout():
     session.clear()
     flash('Cerró sesión exitosamente', 'success')
     return redirect(url_for('index'))
-
 
 @app.route('/listar_pedidos', methods=['GET'])
 def listar_pedidos():
@@ -1023,8 +1089,6 @@ def editar_pedido(id_pedido):
             return redirect(request.url)
 
     return render_template('Pedidos/editar_pedido.html', pedido=pedido_actual)
-
-
 
 # Ruta para eliminar pedido
 @app.route('/pedidos/eliminar/<int:id_pedido>')
